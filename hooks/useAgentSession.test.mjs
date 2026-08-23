@@ -446,3 +446,31 @@ test("keeps a detached viewport in place when streaming completes", () => {
   assert.doesNotMatch(scrollEffectSource, /\|\|/);
   assert.match(source, /addEventListener\("scroll", handleScrollPositionChange/);
 });
+
+test("idle sessions poll a cheap freshness signal and reload injected turns", () => {
+  assert.match(source, /const IDLE_SESSION_REFRESH_POLL_MS = 5_000/);
+  assert.match(source, /freshness\?: string;/);
+  assert.match(source, /sessionFreshnessRef\.current = d\.freshness \?\? null;/);
+
+  const pollSource = source.slice(
+    source.indexOf("  // Recovery net for turns that start while the event stream is closed."),
+    source.indexOf("  const handleAgentEvent = useCallback"),
+  );
+  assert.notEqual(pollSource.indexOf("Recovery net for turns"), -1);
+
+  // The poll targets the lightweight freshness endpoint, not the full session.
+  assert.match(pollSource, /fetch\(`\/api\/sessions\/\$\{encodeURIComponent\(sid\)\}\/freshness`/);
+  assert.match(pollSource, /setTimeout\(\(\) => void tick\(\), IDLE_SESSION_REFRESH_POLL_MS\)/);
+
+  // Never fight an active run or an in-flight submission.
+  assert.match(pollSource, /agentRunningRef\.current/);
+  assert.match(pollSource, /rpcPromptPendingRef\.current/);
+  assert.match(pollSource, /bashRunningRef\.current/);
+  assert.match(pollSource, /eventStreamGraceActiveRef\.current/);
+  assert.match(pollSource, /optimisticUserMessageKeyRef\.current !== null/);
+
+  // The baseline is anchored to the revision of the last loaded snapshot.
+  assert.match(pollSource, /sessionFreshnessRef\.current \?\? fallbackBaseline/);
+  assert.match(pollSource, /revision !== baseline[\s\S]*?void loadSession\(sid\)/);
+  assert.match(pollSource, /sessionIdRef\.current !== sid/);
+});

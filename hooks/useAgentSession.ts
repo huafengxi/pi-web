@@ -44,6 +44,7 @@ export interface SessionData {
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
   };
+  freshness?: string;
 }
 
 interface AgentEvent {
@@ -157,6 +158,7 @@ const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
 const PROMPT_SETTLE_MAX_MS = 20_000;
 const EVENT_STREAM_IDLE_GRACE_MS = 30_000;
+const IDLE_SESSION_REFRESH_POLL_MS = 5_000;
 const AGENT_STATE_RECONCILE_MS = 15_000;
 const BASH_STATE_RECONCILE_MS = 1_000;
 const EVENT_STREAM_READY_TIMEOUT_MS = 60_000;
@@ -316,6 +318,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventStreamGraceGenerationRef = useRef(0);
   const eventStreamGraceActiveRef = useRef(false);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
+  const sessionFreshnessRef = useRef<string | null>(null);
   const sessionPropIdRef = useRef<string | null>(session?.id ?? null);
   const sessionRunningRef = useRef(Boolean(sessionRunning));
   const agentRunningRef = useRef(false);
@@ -478,6 +481,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as SessionData;
       if (sessionIdRef.current !== sid) return null;
+      sessionFreshnessRef.current = d.freshness ?? null;
       const persistedMessages = d.context.messages;
       setData(d);
       setActiveLeafId(d.leafId);
@@ -1018,6 +1022,68 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
+
+  // Recovery net for turns that start while the event stream is closed. The
+  // browser keeps the SSE connection open only while the agent is running,
+  // so a turn injected into an idle session (for example by an extension via
+  // pi.sendUserMessage(msg, { deliverAs: "followUp" })) emits events that no
+  // client receives. Poll a cheap file-revision signal and reload the
+  // messages whenever the session changes underneath us.
+  useEffect(() => {
+    const sid = session?.id;
+    if (!sid) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackBaseline: string | null = null;
+
+    const schedule = () => {
+      if (stopped) return;
+      timer = setTimeout(() => void tick(), IDLE_SESSION_REFRESH_POLL_MS);
+    };
+
+    const tick = async () => {
+      if (stopped || sessionIdRef.current !== sid) return;
+      // Active runs already have a transport (SSE plus settlement handlers),
+      // and submissions in flight own the message list. Polling only fills
+      // the idle gap.
+      if (
+        agentRunningRef.current
+        || rpcPromptPendingRef.current
+        || bashRunningRef.current
+        || eventStreamGraceActiveRef.current
+        || optimisticUserMessageKeyRef.current !== null
+      ) {
+        schedule();
+        return;
+      }
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/freshness`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json() as { revision?: string };
+        if (stopped || sessionIdRef.current !== sid) return;
+        if (typeof data.revision !== "string") throw new Error("Malformed freshness response");
+        const revision = data.revision;
+        // Prefer the revision captured by the last loaded snapshot; fall back
+        // to the first observation when the server did not provide one.
+        const baseline = sessionFreshnessRef.current ?? fallbackBaseline;
+        if (baseline === null) {
+          fallbackBaseline = revision;
+        } else if (revision !== baseline) {
+          fallbackBaseline = null;
+          void loadSession(sid);
+        }
+      } catch {
+        // Keep the last known baseline; the next tick retries.
+      }
+      schedule();
+    };
+
+    schedule();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [session?.id, loadSession]);
 
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
