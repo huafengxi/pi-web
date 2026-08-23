@@ -4,7 +4,7 @@ import {
   buildSessionContext as piBuildSessionContext,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { closeSync, openSync, readSync } from "fs";
+import { closeSync, openSync, readSync, statSync } from "fs";
 import { normalize as normalizePath } from "path";
 import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
@@ -185,6 +185,23 @@ export function invalidateSessionPathCache(sessionId: string): void {
   const pathKey = filePath ? sessionPathKey(filePath) : undefined;
   if (pathKey && reverseCache.get(pathKey) === sessionId) {
     reverseCache.delete(pathKey);
+  }
+}
+
+/**
+ * Cheap change-detection signal for a session file: mtime + size.
+ * Appended entries always grow the file, so two different session states
+ * cannot share a revision even on filesystems with coarse mtime granularity.
+ * Returns "" when the path is missing or unreadable (e.g. a live session
+ * whose entries have not been flushed to disk yet).
+ */
+export function sessionFileRevision(filePath: string | null | undefined): string {
+  if (!filePath) return "";
+  try {
+    const fileStat = statSync(filePath);
+    return `${fileStat.mtimeMs}:${fileStat.size}`;
+  } catch {
+    return "";
   }
 }
 

@@ -9,6 +9,7 @@ import {
   invalidateSessionListCache,
   buildSessionContext,
   readSessionHeader,
+  sessionFileRevision,
 } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
 import { getRpcSession } from "@/lib/rpc-manager";
@@ -72,6 +73,8 @@ export async function GET(
       tree,
       context,
       totalActiveMs,
+      // Anchors the chat's idle freshness poll to this exact snapshot.
+      freshness: sessionFileRevision(filePath),
     });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
