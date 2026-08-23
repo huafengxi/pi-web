@@ -32,7 +32,7 @@ Browser                Next.js Server              AgentSession (in-process)
 
 **Session browsing** (read-only): reads `.jsonl` files through SDK `SessionManager` helpers and `lib/session-reader.ts` — no AgentSession created.  
 **Sending a message**: `startRpcSession()` in `lib/rpc-manager.ts` creates an AgentSession in-process.  
-**Idle freshness fallback**: the chat keeps the SSE stream open only while the agent runs. While disconnected it polls `GET /api/sessions/[id]/freshness` (stat-only file revision) and reloads when the session changes underneath it (e.g. an extension-injected follow-up turn).
+**Idle freshness fallback**: the chat keeps the SSE stream open only while the agent runs. While disconnected it polls `GET /api/sessions/[id]/freshness` (stat-only file revision) and reloads when the session changes underneath it (e.g. an extension-injected follow-up turn). When the poll reports `alive: false` (server reclaimed the session after 10 min idle) and the tab is visible, the chat revives it via `POST /api/agent/[id]` with the side-effect-free `get_state` command (`lib/idle-session-revive.ts` gates dedupe/backoff), so extension `session_start` handlers can drain their notification backlog.
 
 ---
 
@@ -43,7 +43,7 @@ app/api/
   sessions/route.ts               GET  list all sessions
   sessions/[id]/route.ts          GET/PATCH/DELETE session
   sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
-  sessions/[id]/freshness/route.ts GET cheap file-revision signal for idle-session polling
+  sessions/[id]/freshness/route.ts GET cheap file-revision + alive signal for idle-session polling
   sessions/[id]/export/route.ts   GET exported HTML for a session
   agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
   agent/[id]/route.ts             GET state | POST any command

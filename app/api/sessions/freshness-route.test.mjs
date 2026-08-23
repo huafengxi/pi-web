@@ -22,6 +22,10 @@ test("freshness route is cheap and cache-free", () => {
   assert.match(source, /"Cache-Control": "no-store"/);
   assert.doesNotMatch(source, /getEntries\(\)\.length\)\./);
   assert.match(source, /running: liveRpc \? liveRpc\.isRunning\(\) : false/);
+  // The idle chat uses this flag to revive idle-reclaimed sessions. It must
+  // be a plain registry lookup — no startRpcSession in this route.
+  assert.match(source, /alive: Boolean\(liveRpc\)/);
+  assert.doesNotMatch(source, /startRpcSession/);
 });
 
 test("session detail anchors the freshness baseline to its snapshot", () => {
@@ -60,7 +64,7 @@ test("freshness reflects the live registry before any file exists", async (t) =>
     routeContext,
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { revision: "mem:1", running: true });
+  assert.deepEqual(await response.json(), { revision: "mem:1", running: true, alive: true });
 });
 
 test("freshness revision tracks the session file", async (t) => {

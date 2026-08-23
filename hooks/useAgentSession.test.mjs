@@ -70,6 +70,31 @@ test("a rejected submission preserves a different run reported by the server", (
   assert.match(reconcileSource, /if \(!agentRunningRef\.current\) return;[\s\S]*?finishPromptWithoutStream/);
 });
 
+test("idle polling revives sessions reclaimed by the server idle shutdown", () => {
+  const effectSource = source.slice(
+    source.indexOf("  // Recovery net for turns that start while the event stream is closed."),
+    source.indexOf("  const handleAgentEvent = useCallback"),
+  );
+
+  // Visibility gate: backgrounded tabs are throttled and the user cannot
+  // observe a revived session, so revival is pointless there.
+  assert.match(effectSource, /new IdleSessionReviver\(\{[\s\S]*?document\.visibilityState === "visible"/);
+  // Side-effect-free revival command sent through the auto-starting route.
+  assert.match(effectSource, /fetch\(`\/api\/agent\/\$\{encodeURIComponent\(sid\)\}`, \{[\s\S]*?method: "POST",[\s\S]*?body: JSON\.stringify\(\{ type: "get_state" \}\)/);
+  assert.doesNotMatch(effectSource, /body: JSON\.stringify\(\{ type: "prompt"/);
+  // Triggered by the freshness poll reporting a dead wrapper.
+  assert.match(effectSource, /alive\?: boolean/);
+  assert.match(effectSource, /if \(data\.alive === false\) void reviveSession\(\);/);
+  // Dedupe and backoff live in the reviver state machine.
+  assert.match(effectSource, /if \(!reviver\.shouldAttempt\(\)\) return;/);
+  assert.match(effectSource, /reviver\.markAttemptStarted\(\);/);
+  assert.match(effectSource, /reviver\.reportOutcome\(outcome\)/);
+  // A 404 means the session file is gone: stop retrying instead of hammering.
+  assert.match(effectSource, /if \(res\.status === 404\) outcome = "not_found";/);
+  // Stale attempts must not mutate the reviver of a switched-away session.
+  assert.match(effectSource, /if \(!stopped && sessionIdRef\.current === sid\) reviver\.reportOutcome\(outcome\);/);
+});
+
 test("opening System lazily starts a dormant session without sending a prompt", () => {
   const loadSystemPromptSource = source.slice(
     source.indexOf("  const loadSystemPrompt = useCallback"),

@@ -31,7 +31,15 @@ export async function GET(
     }
 
     return NextResponse.json(
-      { revision, running: liveRpc ? liveRpc.isRunning() : false },
+      {
+        revision,
+        running: liveRpc ? liveRpc.isRunning() : false,
+        // Whether the server-side wrapper is alive. A dead wrapper means
+        // the session was reclaimed by the idle shutdown and the chat may
+        // revive it (see lib/idle-session-revive.ts). Cheap registry lookup,
+        // never starts anything.
+        alive: Boolean(liveRpc),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

@@ -20,6 +20,7 @@ import { getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/to
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
+import { IdleSessionReviver, type IdleSessionReviveOutcome } from "@/lib/idle-session-revive";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
@@ -1029,12 +1030,44 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // pi.sendUserMessage(msg, { deliverAs: "followUp" })) emits events that no
   // client receives. Poll a cheap file-revision signal and reload the
   // messages whenever the session changes underneath us.
+  //
+  // The same poll also notices when the server reclaimed the session after
+  // 10 minutes idle (freshness reports alive: false) and revives it while
+  // the tab is visible, so extension session_start handlers can drain their
+  // backlog of notifications.
   useEffect(() => {
     const sid = session?.id;
     if (!sid) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let fallbackBaseline: string | null = null;
+
+    // get_state is read-only: POST /api/agent/[id] restarts the dead wrapper
+    // before executing it, and the command itself injects no message.
+    const reviver = new IdleSessionReviver({
+      isVisible: () => typeof document !== "undefined" && document.visibilityState === "visible",
+    });
+
+    const reviveSession = async () => {
+      if (!reviver.shouldAttempt()) return;
+      reviver.markAttemptStarted();
+      let outcome: IdleSessionReviveOutcome = "ok";
+      try {
+        const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "get_state" }),
+        });
+        if (res.status === 404) outcome = "not_found";
+        else if (!res.ok) outcome = "failed";
+      } catch {
+        outcome = "failed";
+      } finally {
+        // A stale attempt for a switched-away session must not shape the
+        // backoff of the reviver that will be recreated for it.
+        if (!stopped && sessionIdRef.current === sid) reviver.reportOutcome(outcome);
+      }
+    };
 
     const schedule = () => {
       if (stopped) return;
@@ -1059,9 +1092,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       try {
         const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/freshness`, { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as { revision?: string };
+        const data = await res.json() as { revision?: string; alive?: boolean };
         if (stopped || sessionIdRef.current !== sid) return;
         if (typeof data.revision !== "string") throw new Error("Malformed freshness response");
+        if (data.alive === false) void reviveSession();
         const revision = data.revision;
         // Prefer the revision captured by the last loaded snapshot; fall back
         // to the first observation when the server did not provide one.
