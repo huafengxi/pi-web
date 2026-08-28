@@ -2,6 +2,7 @@ import { readdirSync } from "fs";
 import { homedir } from "os";
 import path from "path";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
+import { getConfiguredExplorerRoot } from "./explorer-root";
 import { isExistingPathWithinRoots, isPathWithinRoots } from "./path-security";
 import { listAllSessions } from "./session-reader";
 export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
@@ -43,6 +44,11 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
   }
 
   for (const root of getAdditionalAllowedRoots()) roots.add(root);
+
+  // Optional PI_WEB_EXPLORER_ROOT: pins the sidebar Explorer to a configured
+  // directory. Still subject to the same prefix + realpath containment checks.
+  const explorerRoot = getConfiguredExplorerRoot();
+  if (explorerRoot) roots.add(normalizeSlashes(explorerRoot));
 
   globalThis.__piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
   return roots;

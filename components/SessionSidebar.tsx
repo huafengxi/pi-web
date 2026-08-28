@@ -436,6 +436,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
+  // Optional PI_WEB_EXPLORER_ROOT (server-configured): pins the Explorer to a
+  // fixed directory instead of following the selected session's cwd.
+  const [configuredExplorerRoot, setConfiguredExplorerRoot] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/explorer-root", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data && typeof data.root === "string") {
+          setConfiguredExplorerRoot(data.root);
+        }
+      })
+      .catch(() => {
+        // Keep the default (session cwd) behavior if the endpoint fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const loadSessions = useCallback(async (showLoading = false, force = false) => {
     try {
       if (showLoading) setLoading(true);
@@ -1757,7 +1777,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
               <FileExplorer
                 ref={fileExplorerRef}
-                cwd={selectedCwd ?? selectedCwdProp!}
+                cwd={configuredExplorerRoot ?? selectedCwd ?? selectedCwdProp!}
                 onOpenFile={onOpenFile ?? (() => {})}
                 refreshKey={explorerKey}
                 onAtMention={onAtMention}

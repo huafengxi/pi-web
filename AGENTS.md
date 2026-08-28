@@ -56,6 +56,7 @@ app/api/
   auth/logout/[provider]/route.ts POST OAuth logout
   auth/providers/route.ts         GET OAuth provider list
   cwd/validate/route.ts           POST validate/select a cwd
+  explorer-root/route.ts          GET configured PI_WEB_EXPLORER_ROOT (or null)
   default-cwd/route.ts            POST create ~/pi-cwd-YYYYMMDD
   files/[...path]/route.ts        GET file contents for viewer
   home/route.ts                   GET user home directory
@@ -73,6 +74,7 @@ app/api/
 lib/
   agent-client.ts      typed fetch helper for /api/agent commands
   draft-store.ts       local draft persistence helpers
+  explorer-root.ts     optional PI_WEB_EXPLORER_ROOT parsing
   file-access.ts       allowed file roots for /api/files and worktrees
   file-paths.ts        client/server path encoding helpers
   markdown.ts          shared markdown helpers
@@ -169,6 +171,7 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 ### File access allow-list
 - `/api/files` is intentionally not a general filesystem browser. Allowed roots come from session cwds, their resolved project roots, `~/pi-cwd-*`, and roots explicitly added with `allowFileRoot()`.
 - `/api/cwd/validate`, `/api/default-cwd`, and `/api/worktrees` call `allowFileRoot()` when they make a new location browsable.
+- Optional `PI_WEB_EXPLORER_ROOT` env var (`lib/explorer-root.ts`, exposed via `GET /api/explorer-root`) pins the sidebar Explorer to a fixed directory and adds it to the allow-list. Unset = default behavior (Explorer follows the selected session cwd). All containment checks still apply.
 - Allowed roots are stored slash-normalized, but that is a Set-key convention, not a correctness requirement: `isPathWithinRoots()` (`lib/path-security.ts`, the single implementation behind `isFilePathAllowed()`) re-resolves and case-folds both sides, so either path form authorizes correctly. Keep that one implementation — it is the security boundary.
 
 ### Plugins and skills
